@@ -80,6 +80,7 @@ Start-Sleep -s 5
 
 #Starts the VM, and waits for the boot process to complete by verifying that VMtools is running.
 Start-VM -VM $VMName
+Write-Host "Waiting for VM to boot..." -ForegroundColor Gray
 Start-Sleep -s 20
 do {
     $vm = Get-VM -name $VMName
@@ -93,7 +94,7 @@ Invoke-Command -ComputerName $VMName  -ScriptBlock{
     if ($OS -like "*2012*" -or $OS -like "*2016*") {
         #Takes the offline disk of less than 2GB in size, brings it online, and partitions as GPT
         Get-Disk | Where-Object{$_.isOffline -eq $true -and $_.Size -lt 2147483648} | Set-Disk -IsOffline $false
-        Write-Host ""
+        Write-Host "Disk has been brought online." -ForegroundColor Green
     }
     elseif ($OS -like "*2008*") {
         $OfflineDisk = ("list disk" | diskpart | Where-Object {$_ -match "offline" -and $_ -match "1024 MB"}).subString(2,6)
@@ -124,7 +125,7 @@ attributes disk clear readonly
 Start-Sleep -s 5
 
 #Shut down the VM, then wait to confirm the change in power state to poweredoff
-Shutdown-VMGuest -VM $VMName -Confirm $false
+Shutdown-VMGuest -VM $VMName -Confirm:$false
 do{
     Write-Host "Waiting for $VMName to reach a powered off state..."
     #Checking the power state of the machine
@@ -134,7 +135,7 @@ do{
 until($vm.PowerState -eq "PoweredOff")
 Start-Sleep -s 5
 
-Get-HardDisk -VM $VMName | Where-Object{$_.CapacityGB -eq "1"} | Remove-HardDisk -DeletePermanently -ErrorAction Stop
+Get-HardDisk -VM $VMName | Where-Object{$_.CapacityGB -eq "1"} | Remove-HardDisk -DeletePermanently -Confirm:$false -ErrorAction Stop
 Get-VM $VMName | Get-ScsiController | Set-ScsiController -Type ParaVirtual -ErrorAction Stop
 Start-Sleep -s 5
 Start-VM $VMName
