@@ -25,17 +25,17 @@
     *Bug fixes
 #>
 
-#Run after VM has been IPd and vmware tools has been installed
-
 [CmdletBinding()]
 Param(
     [Parameter(Mandatory=$True)][String]$VMName,
     [Parameter(Mandatory=$True)][String]$vCenter
 )
-
+Import-Module VMware.VimAutomation.Core
+Clear-Host
 #Connects to the vCenter server, if the user running the script does not have permissions, a credential prompt will appear
+Write-Host "PS Module has been loaded. Please enter credentials for your vSphere environment if prompted..."
 Connect-VIServer -Server $vCenter -ErrorAction Stop
-
+Clear-Host
 #Check to ensure the VM exists, and that the running user can connect to it via remote powershell
 $Exists = Get-Vm -name $VMName -ErrorAction SilentlyContinue  
 if ($Exists){  
@@ -58,13 +58,13 @@ else {
 #Shut down the VM, then wait to confirm the change in power state to poweredoff
 if ($vm.Powerstate -eq "PoweredOn" -and $vmview.Guest.ToolsStatus -ne "toolsNotInstalled"){
     Write-Host "Verified the VM is powered on and has VMware tools installed. Proceeding with the shutdown."
-    Shutdown-VM Guest -VM $VMName
+    Shutdown-VMGuest -VM $VMName
     do{
         Write-Host "Waiting for $VMName to reach a powered off state..."
 
         #Checking the power state of the machine
         $vm = Get-VM -name $VMName
-        Start-Sleep 5
+        Start-Sleep -s 5
     }
     until($vm.PowerState -eq "PoweredOff")
     Write-Host "`n `n `n$VMName is now powered off. Starting the SCSI conversion process. The VM will reboot multiple times during the procedure. `n`n" -ForegroundColor Gray
@@ -75,26 +75,27 @@ else {
 }
 
 #Adds a new 1GB disk to a new Paravirtual controller
-Get-VM VMName | New-HardDisk -CapacityGB 1 | New-ScsiController -Type ParaVirtual -ErrorAction Stop
-Start-Sleep 5
+Get-VM $VMName | New-HardDisk -CapacityGB 1 | New-ScsiController -Type ParaVirtual -ErrorAction Stop
+Start-Sleep -s 5
 
 #Starts the VM, and waits for the boot process to complete by verifying that VMtools is running.
-Start-VM -VM VMName
-Start-Sleep 20
+Start-VM -VM $VMName
+Start-Sleep -s 20
 do {
     $vm = Get-VM -name $VMName
     $toolsStatus = $vm.extensionData.Guest.ToolsStatus
-    Start-Sleep 5
+    Start-Sleep -s 5
 } until ($toolsStatus -eq "toolsOK")
 
-Invoke-Command -ComputerName VMName  -ScriptBlock{ 
+Invoke-Command -ComputerName $VMName  -ScriptBlock{ 
     $OS = (Get-CimInstance -ClassName Win32_OperatingSystem).Caption
     #Uses storage cmdlets on 2012 (including r2) and 2016 servers
-    if ($OS -like "2012" -or $OS -like "2016") {
+    if ($OS -like "*2012*" -or $OS -like "*2016*") {
         #Takes the offline disk of less than 2GB in size, brings it online, and partitions as GPT
         Get-Disk | Where-Object{$_.isOffline -eq $true -and $_.Size -lt 2147483648} | Set-Disk -IsOffline $false
+        Write-Host ""
     }
-    elseif ($OS -like "2008") {
+    elseif ($OS -like "*2008*") {
         $OfflineDisk = ("list disk" | diskpart | Where-Object {$_ -match "offline" -and $_ -match "1024 MB"}).subString(2,6)
         #The $DiskPartCmd variable cannot have white space before the commands in the array, hench the lack of indent
         $DiskPartCmd = @"
@@ -104,42 +105,43 @@ online disk
 attributes disk clear readonly 
 "@
         $DiskPartCmd | diskpart
+    
+        #Verify the disk has been brought online
+        Start-Sleep -s 5
+        if(($VerifyDisk = "list disk" | diskpart | Where-Object {$_ -match "offline" -and $_ -match "1024 MB"})) 
+            { 
+                Write-Output "Failed to bring the following disk online:" 
+                $OfflineDisk
+                Return
+            } 
+            else 
+            {
+                Write-Output "Disk is now online." 
+                $VerifyDisk
+            }
     }
-    #Verify the disk has been brought online
-    Start-sleep 5
-    if(($VerifyDisk = "list disk" | diskpart | Where-Object {$_ -match "offline" -and $_ -match "1024 MB"})) 
-        { 
-            Write-Output "Failed to bring the following disk online:" 
-            $OfflineDisk
-            Return
-        } 
-        else 
-        {
-            Write-Output "Disk is now online." 
-            $VerifyDisk
-        }
 }
-Start-Sleep 5
+Start-Sleep -s 5
 
 #Shut down the VM, then wait to confirm the change in power state to poweredoff
-Shutdown-VMGuest -VM $VMName
+Shutdown-VMGuest -VM $VMName -Confirm $false
 do{
     Write-Host "Waiting for $VMName to reach a powered off state..."
     #Checking the power state of the machine
     $vm = Get-VM -name $VMName
-    Start-Sleep 5
+    Start-Sleep -s 5
 }
 until($vm.PowerState -eq "PoweredOff")
-Start-Sleep 5
+Start-Sleep -s 5
 
 Get-HardDisk -VM $VMName | Where-Object{$_.CapacityGB -eq "1"} | Remove-HardDisk -DeletePermanently -ErrorAction Stop
-Get-VM VMName | Get-ScsiController | Set-ScsiController -Type ParaVirtual -ErrorAction Stop
-Start-Sleep 5
-Start-VM VMName
-Start-Sleep 20
+Get-VM $VMName | Get-ScsiController | Set-ScsiController -Type ParaVirtual -ErrorAction Stop
+Start-Sleep -s 5
+Start-VM $VMName
+Start-Sleep -s 20
 do {
     $vm = Get-VM -name $VMName
     $toolsStatus = $vm.extensionData.Guest.ToolsStatus
-    Start-Sleep 5
+    Start-Sleep -s 5
 } until ($toolsStatus -eq "toolsOK")
 Write-Host "`n `n `n The conversion to a Paravirtual SCSI controller is complete!" -ForegroundColor Green
