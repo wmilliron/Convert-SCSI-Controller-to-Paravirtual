@@ -1,4 +1,4 @@
-# SCVMM - VM Deploy to Cloud
+# Convert VMware SCSI Controller to Paravirtual for a Windows VM
 
 ## SYNOPSIS
 
